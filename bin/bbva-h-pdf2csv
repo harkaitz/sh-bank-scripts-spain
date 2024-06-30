@@ -1,0 +1,85 @@
+#!/bin/sh -e
+#l: Copyright (C) 2024  Harkaitz Agirre, harkaitz.aguirre@gmail.com
+#L:
+#L: This program is free software: you can redistribute it and/or modify
+#L: it under the terms of the GNU General Public License as published by
+#L: the Free Software Foundation, either version 3 of the License, or
+#L: (at your option) any later version.
+#L: 
+#L: This program is distributed in the hope that it will be useful,
+#L: but WITHOUT ANY WARRANTY; without even the implied warranty of
+#L: MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#L: GNU General Public License for more details.
+#L: 
+#L: You should have received a copy of the GNU General Public License
+#L: along with this program.  If not, see <https://www.gnu.org/licenses/>.
+##:
+#h: Usage: bbva-h-pdf2csv FILE...
+#h:
+#h: Convert a BBVA monthly bank statement (in spanish) to CSV.
+##:
+bbva_h_pdf2csv() {
+    local pdf txt="/tmp/bbva.txt" line
+    local sed_year='s|^ *EXTRACTO DE [^ ]* \(20[0-9][0-9]\).*|\1|p'
+    local sed_start='s|^\(../..\) \(../..\) \(.*\)  *\([0-9,\.-][0-9,\.-]*\)  *[0-9,\.-][0-9,\.-]*|\1 \2 \4 \3|p'
+    local sed_concept='s|^N [0-9][0-9]* *||;s|^[0-9][0-9][0-9][0-9]* *||g;s|[ \t][ \t]*| |g;s|,|.|g'
+    echo "FIRST LINE"
+    for pdf in "$@"; do
+        if test ! -f "${pdf}"; then
+            echo >&2 "error: ${pdf}: The file does not exist."
+            return 1
+        fi
+        pdftotext -layout "${pdf}" "${txt}"
+        local year=          c_year=
+        local FechaContable= c_FechaContable=
+        local FechaValor=    c_FechaValor=
+        local Observaciones= c_Observaciones=
+        local Importe=       c_Importe=
+        local Concepto=
+        sed 's|	| |g' "${txt}" | while read -r line; do
+            
+            ## Search year.
+            c_year="$(echo "${line}" | sed -n "${sed_year}")"
+            if test -n "${c_year}"; then
+                year="${c_year}"
+                continue
+            fi
+            
+            ## Search start.
+            if test ! -n "${FechaContable}"; then
+                read -r c_FechaContable c_FechaValor c_Importe c_Observaciones <<-EOF
+		$(echo "${line}" | sed -n "${sed_start}")
+		EOF
+                if test -n "${c_FechaContable}"; then
+                    FechaContable="${c_FechaContable}/${year}"
+                    FechaValor="${c_FechaValor}/${year}"
+                    Importe="$(echo "${c_Importe}" | sed 's|\.||g;s|,|.|g')"
+                    Observaciones="$(echo "${c_Observaciones}" | sed "${sed_concept}")"
+                fi
+                continue
+            fi
+            
+            ## Search end
+            Concepto="$(echo "${line}" | sed "${sed_concept}")"
+            echo "${FechaContable},${FechaValor},IGN,${Concepto},${Observaciones},IGN,${Importe},IGN,IGN"
+            
+            ## Start search again.
+            FechaContable=
+            
+        done
+        
+    done
+}
+if test @"${SCRNAME:-$(basename "$0")}" = @"bbva-h-pdf2csv"; then
+    case "${1}" in
+        ''|-h|--help)
+            sed -n 's/^ *#h: \{0,1\}//p' "$0"
+            echo ""
+            sed -n 's/^ *#l: \{0,2\}//p' "$0"
+            ;;
+        *)
+            bbva_h_pdf2csv "$@"
+            exit 0
+            ;;
+    esac
+fi

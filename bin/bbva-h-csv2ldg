@@ -1,0 +1,94 @@
+#!/bin/sh -e
+#l: Copyright (C) 2024  Harkaitz Agirre, harkaitz.aguirre@gmail.com
+#L:
+#L: This program is free software: you can redistribute it and/or modify
+#L: it under the terms of the GNU General Public License as published by
+#L: the Free Software Foundation, either version 3 of the License, or
+#L: (at your option) any later version.
+#L: 
+#L: This program is distributed in the hope that it will be useful,
+#L: but WITHOUT ANY WARRANTY; without even the implied warranty of
+#L: MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#L: GNU General Public License for more details.
+#L: 
+#L: You should have received a copy of the GNU General Public License
+#L: along with this program.  If not, see <https://www.gnu.org/licenses/>.
+##:
+#h: Usage: bbva-h-csv2ldg [OPTS...] FILE...
+#h:
+#h: Convert CSV files downloaded from BBVA to ledger accounting
+#h: files using "getaccount(1)".
+#h:
+#h:   -b BANK    : Bank account (A:Corriente:Tesoreria:574-Bancos:BBVA)
+#h:   -e EXPENSE : Expenses (G:ServiciosExteriores:629-OtrosServicios:Desconocido)
+#h:   -i INCOME  : Income (I:OtrosIngresosGestion:759-IngresosServiciosDiversos:Desconocido)
+##:
+. getaccount
+bbva_h_csv2ldg() {
+    local a_bank='A:Corriente:Tesoreria:574-Bancos:BBVA'
+    local a_income='I:OtrosIngresosGestion:759-IngresosServiciosDiversos:Desconocido'
+    local a_expense='G:ServiciosExteriores:629-OtrosServicios:Desconocido'
+    local OPTIND optopt IFS acc2 err date
+    
+    ## Parse command line arguments.
+    while getopts "b:e:i:" optopt; do
+        case $optopt in
+            b)  a_bank="${OPTARG}";;
+            e)  a_expense="${OPTARG}";;
+            i)  a_income="${OPTARG}";;
+            \?) return 1;;
+        esac
+    done
+    shift $(( $OPTIND - 1 ))
+    if test ! -n "${1}"; then
+        echo >&2 "error: Please specify a CSV file."
+        return 1
+    fi
+    
+    ##
+    IFS=',' acc2= err="$(mktemp)" date=
+    
+    ##
+    sed '1d;s|, |. |g' "$@" | awk 1 | \
+    while read -r FechaContable FechaValor Codigo Concepto Observaciones Oficina Importe Saldo Remesa ign
+    do
+        date="$(echo "${FechaContable}" | sed 's|^\(..\)/\(..\)/\(....\)|\3-\2-\1|')"
+        acc2="$(getaccount -d "${date}" -e "${Importe}€" -c "${Concepto}" -c "${Observaciones}" 2>> "${err}" || true)"
+        case "${acc2}" in
+            skip) continue;;
+        esac
+        case "${Importe}" in
+            -*)
+                cat <<-EOF
+		${date} ${Concepto}${Observaciones:+ - ${Observaciones}}
+		    ${acc2:-${a_expense}}      ${Importe#-}€
+		    ${a_bank}
+		
+		EOF
+                ;;
+            *)
+                cat <<-EOF
+		${date} ${Concepto}${Observaciones:+ - ${Observaciones}}
+		    ${a_bank}       ${Importe}€
+		    ${acc2:-${a_income}}
+		
+		EOF
+                ;;
+        esac
+    done
+    cat "${err}" >&2
+    rm -f "${err}"
+}
+## -------------------------------------------------------------------
+if test @"${SCRNAME:-$(basename "$0")}" = @"bbva-h-csv2ldg"; then
+    case "${1}" in
+        ''|-h|--help)
+            sed -n 's/^ *#h: \{0,1\}//p' "$0"
+            echo ""
+            sed -n 's/^ *#l: \{0,2\}//p' "$0"
+            ;;
+        *)  bbva_h_csv2ldg "$@"
+            exit 0
+            ;;
+    esac
+fi
