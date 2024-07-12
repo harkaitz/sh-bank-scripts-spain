@@ -53,7 +53,7 @@ bbva_h_csv2ldg() {
     while read -r FechaContable FechaValor Codigo Concepto Observaciones Oficina Importe Saldo Remesa ign
     do
         date="$(echo "${FechaContable}" | sed 's|^\(..\)/\(..\)/\(....\)|\3-\2-\1|')"
-        acc2="$(getaccount -d "${date}" -e "${Importe}€" -c "${Concepto}" -c "${Observaciones}" 2>> "${err}" || true)"
+        acc2="$(getaccount -d "${date}" -e "${Importe}€" -c "${Concepto}" -c "${Observaciones}" 2>> "${err}" | head -n 1)"
         case "${acc2}" in
             skip) continue;;
         esac
